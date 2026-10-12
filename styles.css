@@ -199,11 +199,11 @@ select option{background:var(--panel)}
 @keyframes fadeOnly{from{opacity:0}}
 
 /* ---- modal formulario ---- */
-.modal-root{position:fixed;inset:0;z-index:100;display:none;place-items:center;padding:1rem;background:rgba(4,3,2,.82);backdrop-filter:blur(10px)}
+.modal-root{position:fixed;inset:0;z-index:100;display:none;place-items:center;padding:1rem;background:rgba(4,3,2,.94);backdrop-filter:blur(10px)}
 .modal-root.open{display:grid;animation:fadeOnly .3s}
 .modal{width:min(800px,100%);max-height:92vh;overflow:auto;overscroll-behavior-y:contain;background:linear-gradient(180deg,#17120f,#0f0c0a);border:1px solid var(--line);border-radius:28px;box-shadow:0 40px 120px #000;animation:zoom .6s var(--ease)}
 .modal.noanim{animation:none}
-@keyframes zoom{from{opacity:0;transform:scale(.94) translateY(30px)}}
+@keyframes zoom{from{transform:scale(.94) translateY(30px)}}
 .modal::-webkit-scrollbar{width:8px}.modal::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
 .m-head{padding:1.8rem 2rem 0;display:flex;justify-content:space-between;align-items:start}
 .m-head h2{font-family:var(--serif);font-size:2.6rem;font-weight:300}
@@ -217,6 +217,17 @@ label.f,div.f{display:flex;flex-direction:column;gap:.45rem;font-size:.66rem;tex
 label.f input,label.f select,label.f textarea{padding:.8rem .95rem;background:var(--panel);border:1px solid var(--line);border-radius:14px;outline:0;text-transform:none;letter-spacing:0;font-size:.95rem;transition:border .25s,box-shadow .25s;width:100%}
 label.f textarea{min-height:90px;resize:vertical}
 label.f input:focus,label.f select:focus,label.f textarea:focus{border-color:var(--gold);box-shadow:0 0 0 4px rgba(217,180,106,.1)}
+label.f select.select{appearance:none;-webkit-appearance:none;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,var(--gold) 52%),linear-gradient(135deg,var(--gold) 48%,transparent 50%);background-position:calc(100% - 20px) center,calc(100% - 15px) center;background-size:6px 6px,6px 6px;background-repeat:no-repeat;padding-right:2.4rem}
+label.f select.select option{background:var(--panel);color:var(--text)}
+.tags{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;padding:.6rem .7rem;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.tags:focus-within{border-color:var(--gold);box-shadow:0 0 0 4px rgba(217,180,106,.1)}
+.tag-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.35rem .5rem .35rem .8rem;border-radius:999px;background:rgba(217,180,106,.15);color:var(--gold2);font-size:.88rem;text-transform:none;letter-spacing:0;font-family:var(--serif)}
+.tag-chip button{font-size:1rem;line-height:1;color:var(--muted);transition:color .2s}
+.tag-chip button:hover{color:#e48a97}
+.tags input{flex:1;min-width:120px;border:0;background:none;padding:.35rem;outline:0;font-size:.95rem;text-transform:none;letter-spacing:0;color:var(--text)}
+.chip-suggest{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+.chip-sugg{padding:.35rem .8rem;border-radius:999px;border:1px dashed var(--line);color:var(--muted);font-size:.8rem;text-transform:none;letter-spacing:0;transition:all .2s}
+.chip-sugg:hover{border-color:var(--gold);color:var(--gold2)}
 .rate-row{display:flex;align-items:center;gap:1rem}
 .rate-row output{font-family:var(--serif);font-size:2.4rem;color:var(--gold2);min-width:3.6rem}
 input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;padding:0!important;border:0!important;background:linear-gradient(90deg,var(--gold) var(--p,50%),var(--line) var(--p,50%))!important;border-radius:4px}

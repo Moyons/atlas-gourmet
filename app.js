@@ -24,13 +24,13 @@ const wish = () => state.items.filter(i => i.type === 'wish');
 const byId = id => state.items.find(i => i.id === id);
 
 /* ================= DATOS (Supabase Postgres) ================= */
-const rowToItem = r => ({ ...r, created: new Date(r.created_at).getTime(), dishes: r.dishes || [] });
+const rowToItem = r => ({ ...r, created: new Date(r.created_at).getTime(), dishes: r.dishes || [], avgPrice: r.avg_price });
 function itemToRow(it) {
-  const { id, created, type, name, city, country, cuisine, price, rating, stars, date, dishes,
-    wine, companions, notes, reason, priority, target, link, fav, lat, lng, photos: ph } = it;
-  return { type, name, city: city || null, country: country || null, cuisine: cuisine || null,
-    price: price || null, rating: rating ?? null, stars: stars || null, date: date || null,
-    dishes: dishes || [], wine: wine || null, companions: companions || null, notes: notes || null,
+  const { id, created, type, name, city, country, address, cuisine, price, avgPrice, rating, stars, date, dishes,
+    companions, notes, reason, priority, target, link, fav, lat, lng, photos: ph } = it;
+  return { type, name, city: city || null, country: country || null, address: address || null, cuisine: cuisine || null,
+    price: price || null, avg_price: avgPrice || null, rating: rating ?? null, stars: stars || null, date: date || null,
+    dishes: dishes || [], companions: companions || null, notes: notes || null,
     reason: reason || null, priority: priority || null, target: target || null, link: link || null,
     fav: !!fav, lat: lat ?? null, lng: lng ?? null, photos: ph || [] };
 }
@@ -81,6 +81,7 @@ async function removePhotoPaths(paths) {
   if (!paths.length) return;
   await sb.storage.from('photos').remove(paths);
 }
+const PHOTOS_PER_ITEM = 8; // tope por restaurante: mantiene el almacenamiento bajo control
 function shrink(file, max = 1400) {
   return new Promise((res, rej) => {
     const img = new Image(), url = URL.createObjectURL(file);
@@ -266,12 +267,12 @@ function openDetail(id) {
       <div class="d-facts">
         ${isV && it.rating ? `<div class="d-score">${ring(it.rating, 10, 54, 4, true)}<b>${it.rating.toFixed(1)}</b></div>` : ''}
         ${fact('Estrellas', it.stars ? `<span style="color:#ff9aa8">${'★'.repeat(it.stars)}</span> Michelin` : '')}
-        ${fact('Precio', it.price ? `<span style="color:var(--gold)">${'€'.repeat(it.price)}</span>` : '')}
+        ${fact('Precio', it.price ? `<span style="color:var(--gold)">${'€'.repeat(it.price)}</span>${it.avgPrice ? ` <small style="font-size:.55em">(~${it.avgPrice}€/persona)</small>` : ''}` : '')}
         ${fact('Con', esc(it.companions))}${fact('Prioridad', !isV ? `<span style="color:var(--wine2)">${'◆'.repeat(it.priority || 1)}</span>` : '')}${fact('Cuándo', esc(it.target))}
       </div>
+      ${it.address ? sec('Dirección', `<p>${esc(it.address)}</p><p><a style="color:var(--gold)" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([it.name, it.address, it.city, it.country].filter(Boolean).join(', '))}" target="_blank" rel="noopener">Cómo llegar →</a></p>`) : ''}
       ${it.reason ? sec('Por qué quiero ir', `<p>${esc(it.reason)}</p>`) : ''}
       ${it.dishes?.length ? sec('Platos que no olvido', `<div class="dishes">${it.dishes.map((d, i) => `<div class="dish"><i>${String(i + 1).padStart(2, '0')}</i>${esc(d)}</div>`).join('')}</div>`) : ''}
-      ${it.wine ? sec('En la copa', `<p>${esc(it.wine)}</p>`) : ''}
       ${it.notes ? sec('Recuerdos', `<p>${esc(it.notes)}</p>`) : ''}
       ${ph.length > 1 || (ph.length && it.notes) ? sec('Galería', `<div class="gallery">${ph.map(u => `<img src="${u}" alt="" loading="lazy">`).join('')}</div>`) : ''}
       ${it.link ? sec('Web / reservas', `<p><a style="color:var(--gold)" href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.link)}</a></p>`) : ''}
@@ -299,14 +300,19 @@ $('#lightbox').onclick = () => $('#lightbox').classList.remove('open');
 /* ================= FORMULARIO ================= */
 async function openForm(src) {
   const editing = !!src.id && !src.__promote;
-  const d = { type: 'visited', name: '', city: '', country: '', cuisine: '', price: 0, rating: 7.5, stars: 0, date: today(), dishes: [], wine: '', companions: '', notes: '', reason: '', priority: 2, target: '', link: '', fav: false, ...src };
+  const d = { type: 'visited', name: '', city: '', country: '', address: '', cuisine: '', price: 0, avgPrice: '', rating: 7.5, stars: 0, date: today(), dishes: [], companions: '', notes: '', reason: '', priority: 2, target: '', link: '', fav: false, ...src };
   let type = d.type, price = d.price, stars_ = d.stars, prio = d.priority, busy = false;
   let pics = (src.photos || []).map((p, i) => ({ path: p, url: (photos[src.id] || [])[i] }));
   const cuisines = ['Española', 'Italiana', 'Francesa', 'Japonesa', 'Mediterránea', 'Mexicana', 'Peruana', 'Asiática', 'Fusión', 'De autor', 'Tradicional', 'Marisquería', 'Parrilla / Carnes', 'Vegetariana', 'Street food'];
+  const knownCompanions = [...new Set(state.items.flatMap(i => (i.companions || '').split(',').map(s => s.trim()).filter(Boolean)))];
+  let companionsArr = (d.companions || '').split(',').map(s => s.trim()).filter(Boolean);
+  let avgPrice = d.avgPrice || '';
 
-  const snapshot = () => { const f = $('#f'); if (!f) return; for (const el of f.elements) if (el.name && el.name !== 'dishes') d[el.name] = el.type === 'range' ? +el.value : el.value; if (f.dishes) d.dishes = f.dishes.value.split('\n').map(s => s.trim()).filter(Boolean); };
+  const snapshot = () => { const f = $('#f'); if (!f) return; for (const el of f.elements) if (el.name && el.name !== 'dishes') d[el.name] = el.type === 'range' || el.type === 'number' ? (el.value === '' ? null : +el.value) : el.value; if (f.dishes) d.dishes = f.dishes.value.split('\n').map(s => s.trim()).filter(Boolean); d.companions = companionsArr.join(', '); d.avgPrice = avgPrice || null; };
   const paint = () => {
     const isV = type === 'visited';
+    const cuisineKnown = !d.cuisine || cuisines.includes(d.cuisine);
+    const sugg = knownCompanions.filter(c => !companionsArr.includes(c));
     modal(`<div class="m-head"><h2>${editing ? 'Editar' : isV ? 'Nuevo recuerdo' : 'Nuevo deseo'}</h2><button class="x" data-close>×</button></div>
     <form class="m-body" id="f" autocomplete="off">
       ${editing ? '' : `<div class="seg"><button type="button" data-t="visited" class="${isV ? 'on' : ''}">He estado</button><button type="button" data-t="wish" class="${!isV ? 'on' : ''}">Quiero ir</button></div>`}
@@ -314,15 +320,27 @@ async function openForm(src) {
         <label class="f full">Nombre *<input name="name" required value="${esc(d.name)}" placeholder="Ej. Disfrutar"></label>
         <label class="f">Ciudad<input name="city" value="${esc(d.city)}" placeholder="Barcelona"></label>
         <label class="f">País<input name="country" value="${esc(d.country)}" placeholder="España"></label>
-        <label class="f">Tipo de cocina<input name="cuisine" list="cl" value="${esc(d.cuisine)}"><datalist id="cl">${cuisines.map(c => `<option value="${c}">`).join('')}</datalist></label>
-        <div class="f">Precio<div class="opts" id="price">${[1, 2, 3, 4].map(n => `<button type="button" data-v="${n}" class="${price === n ? 'on' : ''}">${'€'.repeat(n)}</button>`).join('')}</div></div>
+        <label class="f full">Dirección<input name="address" value="${esc(d.address)}" placeholder="Calle, número…"></label>
+        <label class="f">Tipo de cocina<select name="cuisine" id="cuisine-sel" class="select">
+          <option value="">Sin especificar</option>
+          ${cuisines.map(c => `<option value="${c}" ${d.cuisine === c ? 'selected' : ''}>${c}</option>`).join('')}
+          <option value="__other" ${cuisineKnown ? '' : 'selected'}>Otra…</option>
+        </select></label>
+        <label class="f" id="cuisine-other-wrap" style="${cuisineKnown ? 'display:none' : ''}">Especifica cuál<input name="cuisine-other" id="cuisine-other" value="${cuisineKnown ? '' : esc(d.cuisine)}" placeholder="Ej. Coreana"></label>
+        <div class="f full">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><span>Precio medio por persona (€)</span><span style="text-transform:none;letter-spacing:0;color:var(--muted)">opcional, calcula el nivel solo</span></div>
+          <input type="number" name="avgPrice" id="avg-price" min="0" step="1" value="${avgPrice}" placeholder="Ej. 35">
+        </div>
+        <div class="f">Nivel de precio<div class="opts" id="price">${[1, 2, 3, 4].map(n => `<button type="button" data-v="${n}" class="${price === n ? 'on' : ''}">${'€'.repeat(n)}</button>`).join('')}</div></div>
         ${isV ? `
         <label class="f">Fecha de la visita<input type="date" name="date" value="${d.date || ''}"></label>
         <div class="f">Estrellas Michelin<div class="opts" id="stars">${[0, 1, 2, 3].map(n => `<button type="button" data-v="${n}" class="${stars_ === n ? 'on' : ''}">${n ? '★'.repeat(n) : 'Ninguna'}</button>`).join('')}</div></div>
         <div class="f full">Valoración<div class="rate-row"><input type="range" name="rating" min="0" max="10" step="0.5" value="${d.rating || 0}" style="--p:${(d.rating || 0) * 10}%"><output>${(d.rating || 0).toFixed(1)}</output></div></div>
         <label class="f full">Platos destacados (uno por línea)<textarea name="dishes" placeholder="Gamba roja al carbón&#10;Tarta de queso">${esc((d.dishes || []).join('\n'))}</textarea></label>
-        <label class="f">Vino / bebida<input name="wine" value="${esc(d.wine)}"></label>
-        <label class="f">¿Con quién?<input name="companions" value="${esc(d.companions)}"></label>
+        <div class="f full">¿Con quién?
+          <div class="tags" id="companions-tags">${companionsArr.map((c, i) => `<span class="tag-chip">${esc(c)}<button type="button" data-rmc="${i}">×</button></span>`).join('')}<input id="companion-input" placeholder="Escribe un nombre y pulsa Enter…"></div>
+          ${sugg.length ? `<div class="chip-suggest">${sugg.map(c => `<button type="button" class="chip-sugg" data-addc="${esc(c)}">+ ${esc(c)}</button>`).join('')}</div>` : ''}
+        </div>
         <label class="f full">Notas y recuerdos<textarea name="notes" placeholder="Servicio, ambiente, qué repetirías…">${esc(d.notes)}</textarea></label>`
         : `
         <div class="f">Prioridad<div class="opts" id="prio">${[1, 2, 3].map(n => `<button type="button" data-v="${n}" class="${prio === n ? 'on' : ''}">${'◆'.repeat(n)}</button>`).join('')}</div></div>
@@ -331,7 +349,7 @@ async function openForm(src) {
         <label class="f full">Enlace (web o reservas)<input name="link" type="url" value="${esc(d.link)}" placeholder="https://"></label>`}
         <div class="f full">Fotos
           <div class="thumbs">${pics.map((p, i) => `<div class="thumb" style="background-image:url(${p.url})"><button type="button" data-rm="${i}" aria-label="Quitar">×</button></div>`).join('')}
-          <div class="thumb add" id="add-ph">+</div></div>
+          ${pics.length < PHOTOS_PER_ITEM ? '<div class="thumb add" id="add-ph">+</div>' : ''}</div>
           <span class="note">Se guardan en tu cuenta (Supabase), privadas: nadie más puede verlas.</span>
           <input type="file" id="ph" accept="image/*" multiple hidden></div>
       </div>
@@ -342,9 +360,20 @@ async function openForm(src) {
     const group = (id, get, set) => $$(`#${id} button`).forEach(b => b.onclick = () => { const v = +b.dataset.v; set(get() === v && id === 'price' ? 0 : v); $$(`#${id} button`).forEach(x => x.classList.toggle('on', +x.dataset.v === get())); });
     group('price', () => price, v => price = v); group('stars', () => stars_, v => stars_ = v); group('prio', () => prio, v => prio = v);
     const r = f.rating; if (r) r.oninput = () => { r.style.setProperty('--p', r.value * 10 + '%'); f.querySelector('output').textContent = (+r.value).toFixed(1); };
-    $('#add-ph').onclick = () => $('#ph').click();
+    const cuisineSel = $('#cuisine-sel');
+    cuisineSel.onchange = () => { $('#cuisine-other-wrap').style.display = cuisineSel.value === '__other' ? '' : 'none'; if (cuisineSel.value === '__other') $('#cuisine-other').focus(); };
+    const avgInput = $('#avg-price');
+    avgInput.oninput = () => { avgPrice = avgInput.value ? +avgInput.value : ''; const t = priceTier(avgPrice); if (t) { price = t; $$('#price button').forEach(x => x.classList.toggle('on', +x.dataset.v === t)); } };
+    const addCompanion = name => { name = name.trim(); if (!name || companionsArr.includes(name)) return; snapshot(); companionsArr.push(name); paint(); };
+    $('#companion-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCompanion(e.target.value); } });
+    $('#companion-input')?.addEventListener('blur', e => { if (e.target.value.trim()) addCompanion(e.target.value); });
+    $$('[data-rmc]').forEach(b => b.onclick = () => { snapshot(); companionsArr.splice(+b.dataset.rmc, 1); paint(); });
+    $$('[data-addc]').forEach(b => b.onclick = () => addCompanion(b.dataset.addc));
+    $('#add-ph')?.addEventListener('click', () => $('#ph').click());
     $('#ph').onchange = async e => {
-      snapshot(); const files = [...e.target.files]; e.target.value = ''; let bad = 0;
+      snapshot(); let files = [...e.target.files]; e.target.value = ''; let bad = 0;
+      const room = PHOTOS_PER_ITEM - pics.length;
+      if (files.length > room) { toast(`Máximo ${PHOTOS_PER_ITEM} fotos por restaurante`); files = files.slice(0, Math.max(0, room)); }
       const tempId = src.id || d.__tempId || (d.__tempId = uid());
       for (const file of files) {
         try { const blob = await shrink(file); const up = await uploadPhoto(tempId, blob); if (up) pics.push(up); else bad++; }
@@ -356,8 +385,9 @@ async function openForm(src) {
     f.onsubmit = async e => { e.preventDefault(); if (busy) return; busy = true; snapshot(); await commit(); busy = false; };
   };
   const commit = async () => {
+    if (d.cuisine === '__other') d.cuisine = (d['cuisine-other'] || '').trim();
     const it = { ...d, type, price, stars: stars_, priority: prio, name: d.name.trim(), photos: pics.map(p => p.path) };
-    delete it.__promote; delete it.__tempId; if (!it.name) return;
+    delete it.__promote; delete it.__tempId; delete it['cuisine-other']; if (!it.name) return;
     const keepLatLng = (editing || src.__promote) && (it.city || '') === (src.city || '') && (it.country || '') === (src.country || '');
     if (!keepLatLng) { it.lat = null; it.lng = null; }
     let saved;
@@ -415,7 +445,7 @@ document.addEventListener('dragstart', e => { if (e.target.tagName === 'IMG') e.
 /* ================= MAPA ================= */
 const geoCache = {};
 async function geocode(it) {
-  const tries = [[it.name, it.city, it.country], [it.city, it.country]].map(a => a.filter(Boolean).join(', ')).filter(q => q.includes(','));
+  const tries = [[it.address, it.city, it.country], [it.name, it.city, it.country], [it.city, it.country]].map(a => a.filter(Boolean).join(', ')).filter(q => q.includes(','));
   for (const q of tries) {
     try {
       if (geoCache[q]) { Object.assign(it, geoCache[q]); return true; }
@@ -486,12 +516,29 @@ function dataMenu() {
     <p style="color:var(--muted);line-height:1.7;margin-bottom:1.6rem">Todo vive en tu cuenta (${esc(session?.user?.email || '')}), no en este dispositivo. Exporta una copia de seguridad cuando quieras.</p>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn gold" id="exp">Exportar copia</button><button class="btn ghost" id="imp">Importar copia</button>
     <button class="btn danger" id="wipe">Borrar todo</button></div>
+    <div style="margin-top:1.8rem;padding-top:1.4rem;border-top:1px solid var(--line)">
+      <h4 style="font-size:.7rem;text-transform:uppercase;letter-spacing:.25em;color:var(--gold);margin-bottom:.4rem;font-weight:500">Niveles de precio</h4>
+      <p style="color:var(--muted);line-height:1.6;margin-bottom:1rem;font-size:.9rem">Al poner el precio medio por persona de un restaurante, la app elige sola €/€€/€€€/€€€€ según estos límites.</p>
+      <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+        <span class="tag">€ hasta</span><input id="bp0" type="number" min="0" value="${priceBreakpoints[0]}" style="width:5rem;padding:.5rem .7rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text)">
+        <span class="tag">€€ hasta</span><input id="bp1" type="number" min="0" value="${priceBreakpoints[1]}" style="width:5rem;padding:.5rem .7rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text)">
+        <span class="tag">€€€ hasta</span><input id="bp2" type="number" min="0" value="${priceBreakpoints[2]}" style="width:5rem;padding:.5rem .7rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text)">
+        <button class="btn gold sm" id="bp-save">Guardar</button>
+      </div>
+    </div>
     <div style="margin-top:1.6rem;padding-top:1.4rem;border-top:1px solid var(--line)"><button class="btn ghost sm" id="signout">Cerrar sesión</button></div></div>`);
   $('#exp').onclick = async () => {
     toast('Preparando copia…');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(state)], { type: 'application/json' })); a.download = `atlas-gourmet-${today()}.json`; a.click();
   };
   $('#imp').onclick = () => $('#import-file').click();
+  $('#bp-save').onclick = async () => {
+    const vals = [+$('#bp0').value, +$('#bp1').value, +$('#bp2').value];
+    if (vals.some(v => !v) || vals[0] >= vals[1] || vals[1] >= vals[2]) { toast('Los límites deben ser crecientes'); return; }
+    priceBreakpoints = vals;
+    const { error } = await sb.auth.updateUser({ data: { priceBreakpoints: vals } });
+    toast(error ? 'No se pudo guardar' : 'Niveles de precio guardados');
+  };
   $('#wipe').onclick = async () => {
     if (!(await confirmDialog('¿Borrar TODOS los datos y fotos de tu cuenta? No se puede deshacer.', { okText: 'Borrar todo' }))) return;
     const paths = state.items.flatMap(i => i.photos || []);
@@ -573,8 +620,16 @@ function burst() {
 
 /* ================= SESIÓN ================= */
 let booted = false;
+// Umbrales de precio medio por persona que deciden €/€€/€€€/€€€€ en el formulario.
+// Se guardan en los metadatos de tu propio usuario de Supabase (no hace falta tabla nueva).
+let priceBreakpoints = [20, 40, 70];
+function priceTier(avg) {
+  if (!avg) return 0;
+  return avg <= priceBreakpoints[0] ? 1 : avg <= priceBreakpoints[1] ? 2 : avg <= priceBreakpoints[2] ? 3 : 4;
+}
 async function boot() {
   if (booted) return; booted = true;
+  if (Array.isArray(session?.user?.user_metadata?.priceBreakpoints)) priceBreakpoints = session.user.user_metadata.priceBreakpoints;
   await fetchItems();
   await loadPhotos();
   render();
