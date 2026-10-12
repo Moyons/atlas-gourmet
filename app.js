@@ -577,15 +577,31 @@ function showGate(msg) {
   if (msg) { const n = $('#gate-note'); n.textContent = msg; n.classList.add('err'); }
 }
 function hideGate() { $('#gate').classList.remove('show'); $('#gate').setAttribute('aria-hidden', 'true'); }
+let gateMode = 'signin'; // 'signin' | 'signup'
+function paintGateMode() {
+  $('#gate-submit').textContent = gateMode === 'signin' ? 'Entrar' : 'Crear cuenta';
+  $('#gate-switch').textContent = gateMode === 'signin' ? '¿Primera vez? Crea una cuenta' : '¿Ya tienes cuenta? Inicia sesión';
+  const n = $('#gate-note'); n.textContent = ''; n.classList.remove('err');
+}
+$('#gate-switch').onclick = () => { gateMode = gateMode === 'signin' ? 'signup' : 'signin'; paintGateMode(); };
 $('#gate-form').onsubmit = async e => {
   e.preventDefault();
-  const email = $('#gate-email').value.trim(); if (!email) return;
-  const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Enviando…';
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split('#')[0] } });
-  btn.disabled = false; btn.textContent = 'Enviar enlace mágico';
+  const email = $('#gate-email').value.trim(), password = $('#gate-pass').value;
+  if (!email || password.length < 6) return;
+  const btn = $('#gate-submit'); btn.disabled = true; btn.textContent = gateMode === 'signin' ? 'Entrando…' : 'Creando…';
+  const { data, error } = gateMode === 'signin'
+    ? await sb.auth.signInWithPassword({ email, password })
+    : await sb.auth.signUp({ email, password });
+  btn.disabled = false;
   const n = $('#gate-note');
-  n.classList.toggle('err', !!error);
-  n.textContent = error ? 'No se pudo enviar: ' + error.message : `Revisa ${email}: te hemos enviado un enlace de acceso.`;
+  if (error) {
+    n.classList.add('err'); n.textContent = error.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : error.message;
+    paintGateMode();
+  } else if (gateMode === 'signup' && !data.session) {
+    n.classList.remove('err'); n.textContent = 'Cuenta creada. Revisa tu correo para confirmarla y luego entra.';
+    gateMode = 'signin'; paintGateMode(); n.textContent = 'Cuenta creada: confirma tu correo y entra.';
+  }
+  // con sesión (entrar, o alta sin confirmación de email activada), onAuthStateChange se encarga de ocultar la puerta.
 };
 sb.auth.onAuthStateChange((event, s) => {
   session = s;

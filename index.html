@@ -29,9 +29,11 @@
     <p class="gate-lead">Tu atlas vive en la nube: inicia sesión para verlo desde cualquier dispositivo.</p>
     <form id="gate-form">
       <input type="email" id="gate-email" placeholder="tu@email.com" required autocomplete="email">
-      <button class="btn gold" type="submit">Enviar enlace mágico</button>
+      <input type="password" id="gate-pass" placeholder="Contraseña" required autocomplete="current-password" minlength="6">
+      <button class="btn gold" type="submit" id="gate-submit">Entrar</button>
+      <button class="btn ghost sm" type="button" id="gate-switch">¿Primera vez? Crea una cuenta</button>
     </form>
-    <p class="gate-note" id="gate-note">Te enviamos un enlace de acceso a tu correo. Sin contraseñas.</p>
+    <p class="gate-note" id="gate-note"></p>
   </div>
 </div>
 
