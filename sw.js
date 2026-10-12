@@ -1,4 +1,4 @@
-const V = 'atlas-v5';
+const V = 'atlas-v6';
 const CORE = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 const SAME_ORIGIN_CORE = new Set(CORE.map(p => new URL(p, self.registration.scope).href));
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE))); self.skipWaiting(); });

@@ -300,3 +300,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
 .gate-user{position:fixed;z-index:35;right:var(--pad);top:1.3rem;font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.6rem}
 .gate-user button{text-decoration:underline;text-underline-offset:2px}
 @media(max-width:820px){.gate-user{display:none}}
+
+/* El sistema pinta las barras de estado y de gestos con theme-color (= --bg, plano).
+   Estos degradados funden el fondo animado hacia ese mismo color en los bordes,
+   así no se nota el corte entre la app y las barras del sistema. */
+@media(max-width:820px){
+  body::before{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;
+    background:linear-gradient(to bottom,var(--bg),transparent 72px calc(100% - 96px),var(--bg))}
+}
