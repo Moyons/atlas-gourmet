@@ -121,21 +121,16 @@ function observe(root = document) { $$('.reveal', root).forEach((el, i) => { el.
 
 /* ================= HERO ================= */
 const HERO = {
-  visited: ['Memorias de mesa', 'Cada plato, <em>un recuerdo.</em>', 'Los restaurantes que has vivido: lo que comiste, con quién y cómo te hizo sentir.'],
-  wish: ['Próximas reservas', 'Mesas que <em>te esperan.</em>', 'Los lugares que sueñas pisar. Prioriza, ilusiónate y tacha cada uno cuando lo cumplas.'],
-  map: ['Cartografía del gusto', 'El mundo, <em>a bocados.</em>', 'Cada punto dorado es una mesa vivida; cada punto granate, una promesa.'],
-  stats: ['Tu paladar en cifras', 'Un paladar <em>con historia.</em>', 'Tus cocinas, tus ciudades, tus notas. Lo que dicen de ti tus mesas.'],
+  visited: ['Memorias de mesa'],
+  wish: ['Próximas reservas'],
+  map: ['Cartografía del gusto'],
+  stats: ['Tu paladar en cifras'],
 };
 let reelTimer;
 function renderHero() {
-  const [eb, title, lead] = HERO[view];
-  $('#hero').classList.toggle('short', view === 'map' || view === 'stats');
-  $('#eyebrow').textContent = eb; $('#lead').textContent = lead;
-  let n = 0;
-  $('#title').innerHTML = title.replace(/(<em>)([^<]+)(<\/em>)|([^\s<>]+)/g, (m, a, b, c, d) => {
-    const w = t => `<span class="word"><span style="animation-delay:${(n++) * 110 + 100}ms">${t}</span></span>`;
-    return d ? w(d) : `<em>${b.split(' ').map(w).join(' ')}</em>`;
-  });
+  const [eb] = HERO[view];
+  $('#hero').classList.add('short');
+  $('#eyebrow').textContent = eb;
   $('#hero-cta').innerHTML = view === 'visited' || view === 'wish' ? `<button class="btn gold" id="cta">${view === 'visited' ? 'Añadir un recuerdo' : 'Añadir un deseo'}</button>` : '';
   $('#cta')?.addEventListener('click', () => openForm({ type: view }));
 
