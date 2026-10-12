@@ -7,7 +7,7 @@
   --pad:clamp(1.1rem,4.5vw,4.5rem);
 }
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;color-scheme:dark;background:var(--bg)}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-weight:300;min-height:100vh;overflow-x:hidden}
 body.lock{overflow:hidden}
 button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
