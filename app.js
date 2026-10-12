@@ -197,7 +197,7 @@ function renderList() {
     html += `<div class="empty reveal"><div class="big">${isV ? '🍽️' : '🕯️'}</div>
       <h3>${all.length ? 'Nada coincide con tu búsqueda' : isV ? 'Tu diario está en blanco' : 'Tu lista de deseos está vacía'}</h3>
       <p>${isV ? 'Empieza con ese restaurante que no puedes olvidar.' : 'Guarda aquí los restaurantes a los que sueñas ir.'}</p>
-      ${all.length ? '' : `<button class="btn gold" data-add="${view}">+ Añadir ${isV ? 'mi primer restaurante' : 'mi primer deseo'}</button> ${state.items.length ? '' : '<button class="btn ghost" id="demo">Ver con ejemplos</button>'}`}</div>`;
+      ${all.length ? '' : `<button class="btn gold" data-add="${view}">+ Añadir ${isV ? 'mi primer restaurante' : 'mi primer deseo'}</button>`}</div>`;
   } else {
     html += `<div id="list">${listHTML(items)}</div>`;
   }
@@ -206,7 +206,6 @@ function renderList() {
   $('#sort')?.addEventListener('change', e => { filters.sort = e.target.value; softList(); });
   $('#cuis')?.addEventListener('change', e => { filters.cuisine = e.target.value; softList(); });
   $('#favf')?.addEventListener('click', () => { filters.fav = !filters.fav; softList(); });
-  $('#demo')?.addEventListener('click', loadDemo);
   $$('[data-add]').forEach(b => b.onclick = () => openForm({ type: b.dataset.add }));
   bindCards();
 }
@@ -382,6 +381,11 @@ function modal(html) { const r = $('#modal-root'); r.innerHTML = `<div class="mo
 function closeModal() { const r = $('#modal-root'); r.classList.remove('open'); r.innerHTML = ''; r.setAttribute('aria-hidden', 'true'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('#lightbox').classList.contains('open')) $('#lightbox').classList.remove('open'); else if ($('#modal-root').classList.contains('open')) closeModal(); else closeDetail(); } });
 
+// Que se sienta como una app, no como una web: sin menú de copiar/compartir
+// al mantener pulsado ni arrastrar imágenes (los campos de texto siguen igual).
+document.addEventListener('contextmenu', e => { if (!e.target.closest('input,textarea')) e.preventDefault(); });
+document.addEventListener('dragstart', e => { if (e.target.tagName === 'IMG') e.preventDefault(); });
+
 /* ================= MAPA ================= */
 const geoCache = {};
 async function geocode(it) {
@@ -455,14 +459,13 @@ function dataMenu() {
   modal(`<div class="m-head"><h2>Tus datos</h2><button class="x" data-close>×</button></div><div class="m-body">
     <p style="color:var(--muted);line-height:1.7;margin-bottom:1.6rem">Todo vive en tu cuenta (${esc(session?.user?.email || '')}), no en este dispositivo. Exporta una copia de seguridad cuando quieras.</p>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn gold" id="exp">Exportar copia</button><button class="btn ghost" id="imp">Importar copia</button>
-    <button class="btn ghost" id="demo2">Cargar ejemplos</button><button class="btn danger" id="wipe">Borrar todo</button></div>
+    <button class="btn danger" id="wipe">Borrar todo</button></div>
     <div style="margin-top:1.6rem;padding-top:1.4rem;border-top:1px solid var(--line)"><button class="btn ghost sm" id="signout">Cerrar sesión</button></div></div>`);
   $('#exp').onclick = async () => {
     toast('Preparando copia…');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(state)], { type: 'application/json' })); a.download = `atlas-gourmet-${today()}.json`; a.click();
   };
   $('#imp').onclick = () => $('#import-file').click();
-  $('#demo2').onclick = async () => { closeModal(); await loadDemo(); };
   $('#wipe').onclick = async () => {
     if (!confirm('¿Borrar TODOS los datos y fotos de tu cuenta? No se puede deshacer.')) return;
     const paths = state.items.flatMap(i => i.photos || []);
@@ -486,22 +489,6 @@ $('#import-file').onchange = async e => {
   } catch { toast('Archivo no válido'); }
   e.target.value = '';
 };
-async function loadDemo() {
-  const m = o => ({ fav: false, dishes: [], ...o });
-  const rows = [
-    m({ type: 'visited', name: 'Disfrutar', city: 'Barcelona', country: 'España', cuisine: 'De autor', price: 4, rating: 9.5, stars: 3, date: '2025-05-17', dishes: ['Gamba roja', 'Caviar que no es caviar', 'Panettone de foie'], wine: 'Maridaje de la casa', companions: 'Familia', notes: 'Una función de teatro comestible. El servicio, impecable.', fav: true, lat: 41.3877, lng: 2.1535 }),
-    m({ type: 'visited', name: 'Sukiyabashi Jiro', city: 'Tokio', country: 'Japón', cuisine: 'Japonesa', price: 4, rating: 9.8, stars: 3, date: '2024-11-02', dishes: ['Otoro', 'Anago', 'Tamago'], notes: 'Veinte piezas en veinticinco minutos. Silencio y perfección.', fav: true, lat: 35.6717, lng: 139.7637 }),
-    m({ type: 'visited', name: 'Osteria Francescana', city: 'Módena', country: 'Italia', cuisine: 'Italiana', price: 4, rating: 9.2, stars: 3, date: '2023-09-09', dishes: ['Cinco edades del Parmigiano'], lat: 44.6471, lng: 10.9252 }),
-    m({ type: 'visited', name: 'Casa Lucio', city: 'Madrid', country: 'España', cuisine: 'Tradicional', price: 3, rating: 8.4, date: '2025-02-14', dishes: ['Huevos rotos'], notes: 'Los mejores huevos rotos de la capital.', lat: 40.4132, lng: -3.7087 }),
-    m({ type: 'visited', name: 'Central', city: 'Lima', country: 'Perú', cuisine: 'Peruana', price: 4, rating: 9.4, date: '2024-03-21', dishes: ['Altitud: Mil metros'], lat: -12.1464, lng: -77.0206 }),
-    m({ type: 'wish', name: 'Noma', city: 'Copenhague', country: 'Dinamarca', cuisine: 'De autor', price: 4, priority: 3, reason: 'Para entender por qué cambió la cocina moderna.', target: 'Aniversario 2027', lat: 55.6829, lng: 12.6107 }),
-    m({ type: 'wish', name: "L'Arpège", city: 'París', country: 'Francia', cuisine: 'Francesa', price: 4, priority: 2, reason: 'Las verduras de Alain Passard.', lat: 48.8567, lng: 2.3165 }),
-    m({ type: 'wish', name: 'Pujol', city: 'Ciudad de México', country: 'México', cuisine: 'Mexicana', price: 3, priority: 2, reason: 'El mole madre de más de dos mil días.', lat: 19.4326, lng: -99.1944 }),
-  ];
-  for (const r of rows) { const saved = await insertItem(r); if (saved) state.items.unshift(saved); }
-  render(); toast('Ejemplos cargados');
-}
-
 /* ================= NAVEGACIÓN ================= */
 function moveInk() { const a = $('.tab.active'), ink = $('#ink'); if (a) { ink.style.left = a.offsetLeft + 'px'; ink.style.width = a.offsetWidth + 'px'; } }
 function setTab() { $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view)); moveInk(); }
@@ -563,7 +550,6 @@ let booted = false;
 async function boot() {
   if (booted) return; booted = true;
   await fetchItems();
-  if (/[?&]demo/.test(location.search) && !state.items.length) await loadDemo();
   await loadPhotos();
   render();
 }
