@@ -602,3 +602,15 @@ sb.auth.onAuthStateChange((event, s) => {
 sb.auth.getSession().then(({ data }) => { session = data.session; if (session) boot(); else showGate(); });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => { });
+
+// Red de seguridad: si algo falla (p.ej. una versión vieja en caché de este archivo
+// desajustada con el HTML nuevo), muestra un aviso con botón de recargar en vez de
+// dejar la pantalla en blanco sin explicación.
+function showFatal(msg) {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;z-index:999;display:grid;place-items:center;background:rgba(5,4,3,.92);color:#f4ede2;font:16px/1.5 system-ui,sans-serif;text-align:center;padding:2rem';
+  d.innerHTML = `<div style="max-width:420px"><p style="margin-bottom:1rem">⚠ Algo no cargó bien.<br><small style="opacity:.6">${msg}</small></p><button style="padding:.8rem 1.6rem;border-radius:999px;background:#d9b46a;color:#1a1208;border:0;font-weight:600;cursor:pointer" onclick="location.reload(true)">Recargar</button></div>`;
+  document.body.append(d);
+}
+addEventListener('error', e => showFatal(e.message || 'error'));
+addEventListener('unhandledrejection', e => showFatal(e.reason?.message || String(e.reason)));
