@@ -286,7 +286,7 @@ function openDetail(id) {
   $('#d-back').onclick = closeDetail;
   $('#d-edit').onclick = () => openForm(it);
   $('#d-del').onclick = async () => {
-    if (!confirm(`¿Eliminar "${it.name}"?`)) return;
+    if (!(await confirmDialog(`¿Eliminar "${it.name}"?`, { okText: 'Eliminar' }))) return;
     state.items = state.items.filter(i => i !== it); delete photos[it.id]; closeDetail(); render(); toast('Eliminado');
     await deleteItem(it.id); if (it.photos?.length) await removePhotoPaths(it.photos);
   };
@@ -377,8 +377,34 @@ async function openForm(src) {
 }
 
 /* ================= MODAL ================= */
-function modal(html) { const r = $('#modal-root'); r.innerHTML = `<div class="modal">${html}</div>`; r.classList.add('open'); r.setAttribute('aria-hidden', 'false'); r.onclick = e => { if (e.target === r || e.target.closest('[data-close]')) closeModal(); }; }
+function modal(html) {
+  const r = $('#modal-root');
+  // Si el modal ya estaba abierto (p.ej. al cambiar "He estado"/"Quiero ir" y
+  // repintar el formulario), no repetir la animación de entrada: solo cuando
+  // se abre de verdad por primera vez.
+  const reopening = r.classList.contains('open');
+  r.innerHTML = `<div class="modal${reopening ? ' noanim' : ''}">${html}</div>`;
+  r.classList.add('open'); r.setAttribute('aria-hidden', 'false');
+  r.onclick = e => { if (e.target === r || e.target.closest('[data-close]')) closeModal(); };
+}
 function closeModal() { const r = $('#modal-root'); r.classList.remove('open'); r.innerHTML = ''; r.setAttribute('aria-hidden', 'true'); }
+
+// Diálogo de confirmación propio, a juego con el resto de la app — nunca el
+// confirm()/alert() del navegador, que se ve genérico y rompe la ilusión de app nativa.
+function confirmDialog(message, opts = {}) {
+  const { danger = true, okText = 'Aceptar', cancelText = 'Cancelar' } = opts;
+  return new Promise(resolve => {
+    modal(`<div class="m-body" style="padding-top:2rem">
+      <p style="font-family:var(--serif);font-size:1.4rem;line-height:1.5;font-weight:300">${esc(message)}</p>
+      <div class="m-foot"><button type="button" class="btn ghost" id="cf-cancel">${esc(cancelText)}</button><button type="button" class="btn ${danger ? 'danger' : 'gold'}" id="cf-ok">${esc(okText)}</button></div>
+    </div>`);
+    let done = false;
+    const finish = v => { if (done) return; done = true; closeModal(); resolve(v); };
+    $('#cf-cancel').onclick = () => finish(false);
+    $('#cf-ok').onclick = () => finish(true);
+    $('#modal-root').onclick = e => { if (e.target.id === 'modal-root') finish(false); };
+  });
+}
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('#lightbox').classList.contains('open')) $('#lightbox').classList.remove('open'); else if ($('#modal-root').classList.contains('open')) closeModal(); else closeDetail(); } });
 
 // Que se sienta como una app, no como una web: sin menú de copiar/compartir
@@ -467,7 +493,7 @@ function dataMenu() {
   };
   $('#imp').onclick = () => $('#import-file').click();
   $('#wipe').onclick = async () => {
-    if (!confirm('¿Borrar TODOS los datos y fotos de tu cuenta? No se puede deshacer.')) return;
+    if (!(await confirmDialog('¿Borrar TODOS los datos y fotos de tu cuenta? No se puede deshacer.', { okText: 'Borrar todo' }))) return;
     const paths = state.items.flatMap(i => i.photos || []);
     if (paths.length) await removePhotoPaths(paths);
     await sb.from('items').delete().eq('user_id', session.user.id);

@@ -202,6 +202,7 @@ select option{background:var(--panel)}
 .modal-root{position:fixed;inset:0;z-index:100;display:none;place-items:center;padding:1rem;background:rgba(4,3,2,.82);backdrop-filter:blur(10px)}
 .modal-root.open{display:grid;animation:fadeOnly .3s}
 .modal{width:min(800px,100%);max-height:92vh;overflow:auto;overscroll-behavior-y:contain;background:linear-gradient(180deg,#17120f,#0f0c0a);border:1px solid var(--line);border-radius:28px;box-shadow:0 40px 120px #000;animation:zoom .6s var(--ease)}
+.modal.noanim{animation:none}
 @keyframes zoom{from{opacity:0;transform:scale(.94) translateY(30px)}}
 .modal::-webkit-scrollbar{width:8px}.modal::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
 .m-head{padding:1.8rem 2rem 0;display:flex;justify-content:space-between;align-items:start}
