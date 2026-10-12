@@ -601,7 +601,19 @@ sb.auth.onAuthStateChange((event, s) => {
 });
 sb.auth.getSession().then(({ data }) => { session = data.session; if (session) boot(); else showGate(); });
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => { });
+// Cada vez que se abre la app (o se vuelve a ella) se busca una versión nueva
+// del propio service worker. Cuando la encuentra, se recarga sola para mostrarla
+// — así nunca hace falta explicarle al usuario cómo "forzar" la actualización.
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloading) return; reloading = true; location.reload(); });
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      reg.update();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); });
+    }).catch(() => { });
+  });
+}
 
 // Red de seguridad: si algo falla (p.ej. una versión vieja en caché de este archivo
 // desajustada con el HTML nuevo), muestra un aviso con botón de recargar en vez de
