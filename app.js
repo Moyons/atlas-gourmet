@@ -497,7 +497,7 @@ $$('.tab').forEach(t => t.onclick = () => go(t.dataset.view));
 $$('#bottom [data-view]').forEach(b => b.onclick = () => go(b.dataset.view));
 $('#brand').onclick = e => { e.preventDefault(); go('visited'); };
 $('#btn-add').onclick = $('#bn-add').onclick = () => openForm({ type: view === 'wish' ? 'wish' : 'visited' });
-$('#btn-data').onclick = dataMenu;
+$('#btn-data').onclick = $('#btn-data-m').onclick = dataMenu;
 addEventListener('resize', moveInk);
 document.fonts?.ready.then(moveInk);
 addEventListener('scroll', () => {
