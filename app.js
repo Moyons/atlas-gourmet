@@ -577,31 +577,22 @@ function showGate(msg) {
   if (msg) { const n = $('#gate-note'); n.textContent = msg; n.classList.add('err'); }
 }
 function hideGate() { $('#gate').classList.remove('show'); $('#gate').setAttribute('aria-hidden', 'true'); }
-let gateMode = 'signin'; // 'signin' | 'signup'
-function paintGateMode() {
-  $('#gate-submit').textContent = gateMode === 'signin' ? 'Entrar' : 'Crear cuenta';
-  $('#gate-switch').textContent = gateMode === 'signin' ? '¿Primera vez? Crea una cuenta' : '¿Ya tienes cuenta? Inicia sesión';
-  const n = $('#gate-note'); n.textContent = ''; n.classList.remove('err');
-}
-$('#gate-switch').onclick = () => { gateMode = gateMode === 'signin' ? 'signup' : 'signin'; paintGateMode(); };
+// Cuenta única de administrador: el email va fijo en el código, el usuario solo ve una contraseña.
+const ADMIN_EMAIL = 'ivanmoyro+gourmet@gmail.com';
 $('#gate-form').onsubmit = async e => {
   e.preventDefault();
-  const email = $('#gate-email').value.trim(), password = $('#gate-pass').value;
-  if (!email || password.length < 6) return;
-  const btn = $('#gate-submit'); btn.disabled = true; btn.textContent = gateMode === 'signin' ? 'Entrando…' : 'Creando…';
-  const { data, error } = gateMode === 'signin'
-    ? await sb.auth.signInWithPassword({ email, password })
-    : await sb.auth.signUp({ email, password });
-  btn.disabled = false;
-  const n = $('#gate-note');
+  const password = $('#gate-pass').value; if (password.length < 6) return;
+  const btn = $('#gate-submit'); btn.disabled = true; btn.textContent = 'Entrando…';
+  const n = $('#gate-note'); n.textContent = ''; n.classList.remove('err');
+  let { error } = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password });
   if (error) {
-    n.classList.add('err'); n.textContent = error.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos.' : error.message;
-    paintGateMode();
-  } else if (gateMode === 'signup' && !data.session) {
-    n.classList.remove('err'); n.textContent = 'Cuenta creada. Revisa tu correo para confirmarla y luego entra.';
-    gateMode = 'signin'; paintGateMode(); n.textContent = 'Cuenta creada: confirma tu correo y entra.';
+    // Primera vez: la cuenta aún no existe → se crea con esta misma contraseña.
+    const su = await sb.auth.signUp({ email: ADMIN_EMAIL, password });
+    error = su.error && su.error.message !== 'User already registered' ? su.error : (su.data.session ? null : { message: 'Contraseña incorrecta.' });
   }
-  // con sesión (entrar, o alta sin confirmación de email activada), onAuthStateChange se encarga de ocultar la puerta.
+  btn.disabled = false; btn.textContent = 'Entrar';
+  if (error) { n.classList.add('err'); n.textContent = error.message === 'Invalid login credentials' ? 'Contraseña incorrecta.' : error.message; }
+  // con sesión, onAuthStateChange oculta la puerta y carga los datos.
 };
 sb.auth.onAuthStateChange((event, s) => {
   session = s;
