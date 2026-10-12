@@ -1,46 +1,85 @@
 'use strict';
 /* Atlas Gourmet — diario de restaurantes + lista de deseos.
-   Textos en localStorage; fotos en IndexedDB (en el propio dispositivo, sin servidor ni coste). */
+   Todo vive en Supabase (Postgres + Storage): nada se guarda en el dispositivo,
+   así que cambiar de móvil no pierde nada. Requiere sesión (enlace mágico por email). */
 
-const KEY = 'atlas-gourmet-v1';
+const SUPABASE_URL = 'https://yxdzpmnyfexxhzsckzds.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_cCAzuyN2kZB27dwW6I-g3g_SW-rOhgJ';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => new Date().toISOString().slice(0, 10);
 
-let state = load();
+let state = { items: [] };
+let session = null;
 let view = 'visited';
 let filters = { q: '', sort: 'date', cuisine: '', fav: false };
 let map = null;
 
-function load() { try { return JSON.parse(localStorage.getItem(KEY)) || { items: [] }; } catch { return { items: [] }; } }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { toast('⚠ No se pudo guardar: almacenamiento lleno'); } }
 const visited = () => state.items.filter(i => i.type === 'visited');
 const wish = () => state.items.filter(i => i.type === 'wish');
 const byId = id => state.items.find(i => i.id === id);
 
-/* ================= FOTOS (IndexedDB) ================= */
-const photos = {}; // id -> [objectURL]
-const idb = new Promise((res, rej) => {
-  if (!window.indexedDB) return rej();
-  const r = indexedDB.open('atlas-gourmet', 1);
-  r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id' });
-  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-});
-idb.catch(() => { });
-async function store(mode, fn) {
-  const db = await idb;
-  return new Promise((res, rej) => { const t = db.transaction('photos', mode); const rq = fn(t.objectStore('photos')); t.oncomplete = () => res(rq?.result); t.onerror = () => rej(t.error); });
+/* ================= DATOS (Supabase Postgres) ================= */
+const rowToItem = r => ({ ...r, created: new Date(r.created_at).getTime(), dishes: r.dishes || [] });
+function itemToRow(it) {
+  const { id, created, type, name, city, country, cuisine, price, rating, stars, date, dishes,
+    wine, companions, notes, reason, priority, target, link, fav, lat, lng, photos: ph } = it;
+  return { type, name, city: city || null, country: country || null, cuisine: cuisine || null,
+    price: price || null, rating: rating ?? null, stars: stars || null, date: date || null,
+    dishes: dishes || [], wine: wine || null, companions: companions || null, notes: notes || null,
+    reason: reason || null, priority: priority || null, target: target || null, link: link || null,
+    fav: !!fav, lat: lat ?? null, lng: lng ?? null, photos: ph || [] };
+}
+async function fetchItems() {
+  const { data, error } = await sb.from('items').select('*').order('created_at', { ascending: false });
+  if (error) { toast('No se pudieron cargar tus datos: ' + error.message); return; }
+  state.items = data.map(rowToItem);
+}
+async function insertItem(it) {
+  const { data, error } = await sb.from('items').insert(itemToRow(it)).select().single();
+  if (error) { toast('No se pudo guardar: ' + error.message); return null; }
+  return rowToItem(data);
+}
+async function updateItem(id, patch) {
+  const { data, error } = await sb.from('items').update(patch).eq('id', id).select().single();
+  if (error) { toast('No se pudo guardar: ' + error.message); return null; }
+  return rowToItem(data);
+}
+async function deleteItem(id) {
+  const { error } = await sb.from('items').delete().eq('id', id);
+  if (error) toast('No se pudo eliminar: ' + error.message);
+}
+
+/* ================= FOTOS (Supabase Storage, privadas) ================= */
+const photos = {}; // id -> [url firmada]
+async function signPaths(paths) {
+  if (!paths.length) return [];
+  const { data, error } = await sb.storage.from('photos').createSignedUrls(paths, 60 * 60 * 24 * 7);
+  if (error) return [];
+  return data.map(d => d.signedUrl).filter(Boolean);
 }
 async function loadPhotos() {
-  try { (await store('readonly', s => s.getAll())).forEach(r => photos[r.id] = r.blobs.map(b => URL.createObjectURL(b))); } catch { }
+  const all = [...new Set(state.items.flatMap(i => i.photos || []))];
+  if (!all.length) return;
+  const { data, error } = await sb.storage.from('photos').createSignedUrls(all, 60 * 60 * 24 * 7);
+  if (error) return;
+  const map = {}; data.forEach((d, i) => { if (d.signedUrl) map[all[i]] = d.signedUrl; });
+  for (const it of state.items) photos[it.id] = (it.photos || []).map(p => map[p]).filter(Boolean);
 }
-async function getBlobs(id) { try { return (await store('readonly', s => s.get(id)))?.blobs || []; } catch { return []; } }
-async function setPhotos(id, blobs) {
-  (photos[id] || []).forEach(u => URL.revokeObjectURL(u));
-  try { blobs.length ? await store('readwrite', s => s.put({ id, blobs })) : await store('readwrite', s => s.delete(id)); } catch { toast('No se pudieron guardar las fotos'); return; }
-  photos[id] = blobs.map(b => URL.createObjectURL(b));
+async function uploadPhoto(itemId, blob) {
+  const path = `${session.user.id}/${itemId}/${uid()}.jpg`;
+  const { error } = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+  if (error) { toast('No se pudo subir la foto: ' + error.message); return null; }
+  const [url] = await signPaths([path]);
+  return { path, url };
+}
+async function removePhotoPaths(paths) {
+  if (!paths.length) return;
+  await sb.storage.from('photos').remove(paths);
 }
 function shrink(file, max = 1400) {
   return new Promise((res, rej) => {
@@ -54,7 +93,6 @@ function shrink(file, max = 1400) {
     img.onerror = () => rej(); img.src = url;
   });
 }
-const blobToData = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
 
 /* ================= UTILIDADES VISUALES ================= */
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3000); }
@@ -213,7 +251,7 @@ function bindCards() {
     c.onmousemove = e => { const r = c.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5; c.style.transition = 'box-shadow .5s,border-color .4s,opacity .9s'; c.style.transform = `perspective(1000px) rotateY(${x * 6}deg) rotateX(${-y * 6}deg) translateY(-6px)`; };
     c.onmouseleave = () => { c.style.transition = ''; c.style.transform = ''; };
   });
-  $$('.fav').forEach(f => f.onclick = e => { e.stopPropagation(); const it = byId(f.closest('.card').dataset.id); it.fav = !it.fav; save(); f.classList.toggle('on', it.fav); f.textContent = it.fav ? '♥' : '♡'; });
+  $$('.fav').forEach(f => f.onclick = e => { e.stopPropagation(); const it = byId(f.closest('.card').dataset.id); it.fav = !it.fav; f.classList.toggle('on', it.fav); f.textContent = it.fav ? '♥' : '♡'; updateItem(it.id, { fav: it.fav }); });
 }
 
 /* ================= DETALLE ================= */
@@ -253,7 +291,11 @@ function openDetail(id) {
   $$('.gallery img', dt).forEach(im => im.onclick = () => { const lb = $('#lightbox'); lb.innerHTML = `<img src="${im.src}">`; lb.classList.add('open'); });
   $('#d-back').onclick = closeDetail;
   $('#d-edit').onclick = () => openForm(it);
-  $('#d-del').onclick = async () => { if (confirm(`¿Eliminar "${it.name}"?`)) { state.items = state.items.filter(i => i !== it); await setPhotos(it.id, []); delete photos[it.id]; save(); closeDetail(); render(); toast('Eliminado'); } };
+  $('#d-del').onclick = async () => {
+    if (!confirm(`¿Eliminar "${it.name}"?`)) return;
+    state.items = state.items.filter(i => i !== it); delete photos[it.id]; closeDetail(); render(); toast('Eliminado');
+    await deleteItem(it.id); if (it.photos?.length) await removePhotoPaths(it.photos);
+  };
   $('#d-went')?.addEventListener('click', () => openForm({ ...it, type: 'visited', date: today(), __promote: true }));
 }
 const sec = (t, h) => `<div class="d-sec"><h4>${t}</h4>${h}</div>`;
@@ -264,8 +306,8 @@ $('#lightbox').onclick = () => $('#lightbox').classList.remove('open');
 async function openForm(src) {
   const editing = !!src.id && !src.__promote;
   const d = { type: 'visited', name: '', city: '', country: '', cuisine: '', price: 0, rating: 7.5, stars: 0, date: today(), dishes: [], wine: '', companions: '', notes: '', reason: '', priority: 2, target: '', link: '', fav: false, ...src };
-  let type = d.type, price = d.price, stars_ = d.stars, prio = d.priority;
-  let pics = src.id ? (await getBlobs(src.id)).map(b => ({ blob: b, url: URL.createObjectURL(b) })) : [];
+  let type = d.type, price = d.price, stars_ = d.stars, prio = d.priority, busy = false;
+  let pics = (src.photos || []).map((p, i) => ({ path: p, url: (photos[src.id] || [])[i] }));
   const cuisines = ['Española', 'Italiana', 'Francesa', 'Japonesa', 'Mediterránea', 'Mexicana', 'Peruana', 'Asiática', 'Fusión', 'De autor', 'Tradicional', 'Marisquería', 'Parrilla / Carnes', 'Vegetariana', 'Street food'];
 
   const snapshot = () => { const f = $('#f'); if (!f) return; for (const el of f.elements) if (el.name && el.name !== 'dishes') d[el.name] = el.type === 'range' ? +el.value : el.value; if (f.dishes) d.dishes = f.dishes.value.split('\n').map(s => s.trim()).filter(Boolean); };
@@ -296,7 +338,7 @@ async function openForm(src) {
         <div class="f full">Fotos
           <div class="thumbs">${pics.map((p, i) => `<div class="thumb" style="background-image:url(${p.url})"><button type="button" data-rm="${i}" aria-label="Quitar">×</button></div>`).join('')}
           <div class="thumb add" id="add-ph">+</div></div>
-          <span class="note">Se guardan en este dispositivo, comprimidas. No ocupan servidor ni cuestan nada.</span>
+          <span class="note">Se guardan en tu cuenta (Supabase), privadas: nadie más puede verlas.</span>
           <input type="file" id="ph" accept="image/*" multiple hidden></div>
       </div>
       <div class="m-foot"><button type="button" class="btn ghost" data-close>Cancelar</button><button class="btn gold" type="submit">${editing ? 'Guardar cambios' : isV ? 'Guardar recuerdo' : 'Añadir a la lista'}</button></div>
@@ -308,28 +350,34 @@ async function openForm(src) {
     const r = f.rating; if (r) r.oninput = () => { r.style.setProperty('--p', r.value * 10 + '%'); f.querySelector('output').textContent = (+r.value).toFixed(1); };
     $('#add-ph').onclick = () => $('#ph').click();
     $('#ph').onchange = async e => {
-      snapshot(); let bad = 0;
-      for (const file of e.target.files) { try { const blob = await shrink(file); pics.push({ blob, url: URL.createObjectURL(blob) }); } catch { bad++; } }
-      if (bad) toast('Alguna foto no se pudo leer (¿formato HEIC?)'); paint();
+      snapshot(); const files = [...e.target.files]; e.target.value = ''; let bad = 0;
+      const tempId = src.id || d.__tempId || (d.__tempId = uid());
+      for (const file of files) {
+        try { const blob = await shrink(file); const up = await uploadPhoto(tempId, blob); if (up) pics.push(up); else bad++; }
+        catch { bad++; }
+      }
+      if (bad) toast('Alguna foto no se pudo subir (¿formato HEIC o sin conexión?)'); paint();
     };
-    $$('[data-rm]').forEach(b => b.onclick = () => { snapshot(); pics.splice(+b.dataset.rm, 1); paint(); });
-    f.onsubmit = async e => { e.preventDefault(); snapshot(); await commit(); };
+    $$('[data-rm]').forEach(b => b.onclick = async () => { snapshot(); const [p] = pics.splice(+b.dataset.rm, 1); paint(); if (p) await removePhotoPaths([p.path]); });
+    f.onsubmit = async e => { e.preventDefault(); if (busy) return; busy = true; snapshot(); await commit(); busy = false; };
   };
   const commit = async () => {
-    const it = { ...d, type, price, stars: stars_, priority: prio, name: d.name.trim() };
-    delete it.__promote; if (!it.name) return;
+    const it = { ...d, type, price, stars: stars_, priority: prio, name: d.name.trim(), photos: pics.map(p => p.path) };
+    delete it.__promote; delete it.__tempId; if (!it.name) return;
+    const keepLatLng = (editing || src.__promote) && (it.city || '') === (src.city || '') && (it.country || '') === (src.country || '');
+    if (!keepLatLng) { it.lat = null; it.lng = null; }
     let saved;
-    if (editing) saved = Object.assign(src, it);
-    else if (src.__promote) saved = Object.assign(byId(src.id), it, { type: 'visited' });
-    else { it.id = uid(); it.created = Date.now(); state.items.push(it); saved = it; }
-    if (editing || src.__promote) { const old = saved.city + saved.country; if (old !== (src.city || '') + (src.country || '')) { delete saved.lat; delete saved.lng; } }
-    await setPhotos(saved.id, pics.map(p => p.blob));
-    save(); closeModal(); closeDetail();
+    if (editing) { saved = await updateItem(src.id, itemToRow(it)); if (saved) Object.assign(src, saved); }
+    else if (src.__promote) { saved = await updateItem(src.id, { ...itemToRow(it), type: 'visited' }); }
+    else { saved = await insertItem(it); if (saved) state.items.unshift(saved); }
+    if (!saved) return;
+    photos[saved.id] = pics.map(p => p.url);
+    closeModal(); closeDetail();
     view = saved.type; filters = { q: '', sort: view === 'wish' ? 'prio' : 'date', cuisine: '', fav: false }; setTab(); render();
     toast(src.__promote ? '🍷 ¡Un sueño cumplido!' : editing ? 'Cambios guardados' : '✦ Añadido a tu atlas');
     if (src.__promote || !editing) burst();
     window.scrollTo({ top: 0 });
-    if (!saved.lat) geocode(saved).then(ok => ok && save());
+    if (!saved.lat) geocode(saved).then(ok => ok && updateItem(saved.id, { lat: saved.lat, lng: saved.lng }));
   };
   paint();
 }
@@ -373,7 +421,7 @@ function renderMap() {
     for (const [n, it] of missing.entries()) {
       if (view !== 'map') return;
       $('#mapnote').textContent = `Localizando ${n + 1}/${missing.length}…`;
-      if (await geocode(it)) { add(it); save(); if (pts.length === 1) map?.setView(pts[0], 5); }
+      if (await geocode(it)) { add(it); updateItem(it.id, { lat: it.lat, lng: it.lng }); if (pts.length === 1) map?.setView(pts[0], 5); }
     }
     if ($('#mapnote')) $('#mapnote').textContent = '';
     if (map && pts.length > 1) map.fitBounds(pts, { padding: [60, 60], maxZoom: 6 });
@@ -410,33 +458,42 @@ function renderStats() {
 /* ================= DATOS ================= */
 function dataMenu() {
   modal(`<div class="m-head"><h2>Tus datos</h2><button class="x" data-close>×</button></div><div class="m-body">
-    <p style="color:var(--muted);line-height:1.7;margin-bottom:1.6rem">Todo se guarda en este dispositivo, fotos incluidas. Exporta una copia para no perderlo o pasarlo al móvil (o al revés).</p>
+    <p style="color:var(--muted);line-height:1.7;margin-bottom:1.6rem">Todo vive en tu cuenta (${esc(session?.user?.email || '')}), no en este dispositivo. Exporta una copia de seguridad cuando quieras.</p>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn gold" id="exp">Exportar copia</button><button class="btn ghost" id="imp">Importar copia</button>
-    <button class="btn ghost" id="demo2">Cargar ejemplos</button><button class="btn danger" id="wipe">Borrar todo</button></div></div>`);
+    <button class="btn ghost" id="demo2">Cargar ejemplos</button><button class="btn danger" id="wipe">Borrar todo</button></div>
+    <div style="margin-top:1.6rem;padding-top:1.4rem;border-top:1px solid var(--line)"><button class="btn ghost sm" id="signout">Cerrar sesión</button></div></div>`);
   $('#exp').onclick = async () => {
     toast('Preparando copia…');
-    const ph = {}; for (const i of state.items) { const b = await getBlobs(i.id); if (b.length) ph[i.id] = await Promise.all(b.map(blobToData)); }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...state, photos: ph })], { type: 'application/json' })); a.download = `atlas-gourmet-${today()}.json`; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(state)], { type: 'application/json' })); a.download = `atlas-gourmet-${today()}.json`; a.click();
   };
   $('#imp').onclick = () => $('#import-file').click();
-  $('#demo2').onclick = () => { loadDemo(); closeModal(); };
-  $('#wipe').onclick = async () => { if (confirm('¿Borrar TODOS los datos y fotos? No se puede deshacer.')) { for (const i of state.items) await setPhotos(i.id, []); state = { items: [] }; save(); closeModal(); render(); } };
+  $('#demo2').onclick = async () => { closeModal(); await loadDemo(); };
+  $('#wipe').onclick = async () => {
+    if (!confirm('¿Borrar TODOS los datos y fotos de tu cuenta? No se puede deshacer.')) return;
+    const paths = state.items.flatMap(i => i.photos || []);
+    if (paths.length) await removePhotoPaths(paths);
+    await sb.from('items').delete().eq('user_id', session.user.id);
+    state = { items: [] }; Object.keys(photos).forEach(k => delete photos[k]);
+    closeModal(); render();
+  };
+  $('#signout').onclick = async () => { await sb.auth.signOut(); };
 }
 $('#import-file').onchange = async e => {
   try {
     const j = JSON.parse(await e.target.files[0].text()); if (!Array.isArray(j.items)) throw 0;
     const have = new Set(state.items.map(i => i.id));
     for (const i of j.items) {
-      if (!i?.name || have.has(i.id)) continue; state.items.push(i);
-      if (j.photos?.[i.id]) await setPhotos(i.id, await Promise.all(j.photos[i.id].map(u => fetch(u).then(r => r.blob()))));
+      if (!i?.name || have.has(i.id)) continue;
+      const row = itemToRow(i); row.photos = []; // las fotos del archivo importado no se migran: pertenecen a otra cuenta
+      const saved = await insertItem(row); if (saved) state.items.unshift(saved);
     }
-    save(); closeModal(); render(); toast('Importación completada');
+    closeModal(); render(); toast('Importación completada');
   } catch { toast('Archivo no válido'); }
   e.target.value = '';
 };
-function loadDemo() {
-  const m = o => ({ id: uid(), created: Date.now(), fav: false, dishes: [], ...o });
-  state.items.push(
+async function loadDemo() {
+  const m = o => ({ fav: false, dishes: [], ...o });
+  const rows = [
     m({ type: 'visited', name: 'Disfrutar', city: 'Barcelona', country: 'España', cuisine: 'De autor', price: 4, rating: 9.5, stars: 3, date: '2025-05-17', dishes: ['Gamba roja', 'Caviar que no es caviar', 'Panettone de foie'], wine: 'Maridaje de la casa', companions: 'Familia', notes: 'Una función de teatro comestible. El servicio, impecable.', fav: true, lat: 41.3877, lng: 2.1535 }),
     m({ type: 'visited', name: 'Sukiyabashi Jiro', city: 'Tokio', country: 'Japón', cuisine: 'Japonesa', price: 4, rating: 9.8, stars: 3, date: '2024-11-02', dishes: ['Otoro', 'Anago', 'Tamago'], notes: 'Veinte piezas en veinticinco minutos. Silencio y perfección.', fav: true, lat: 35.6717, lng: 139.7637 }),
     m({ type: 'visited', name: 'Osteria Francescana', city: 'Módena', country: 'Italia', cuisine: 'Italiana', price: 4, rating: 9.2, stars: 3, date: '2023-09-09', dishes: ['Cinco edades del Parmigiano'], lat: 44.6471, lng: 10.9252 }),
@@ -445,8 +502,9 @@ function loadDemo() {
     m({ type: 'wish', name: 'Noma', city: 'Copenhague', country: 'Dinamarca', cuisine: 'De autor', price: 4, priority: 3, reason: 'Para entender por qué cambió la cocina moderna.', target: 'Aniversario 2027', lat: 55.6829, lng: 12.6107 }),
     m({ type: 'wish', name: "L'Arpège", city: 'París', country: 'Francia', cuisine: 'Francesa', price: 4, priority: 2, reason: 'Las verduras de Alain Passard.', lat: 48.8567, lng: 2.3165 }),
     m({ type: 'wish', name: 'Pujol', city: 'Ciudad de México', country: 'México', cuisine: 'Mexicana', price: 3, priority: 2, reason: 'El mole madre de más de dos mil días.', lat: 19.4326, lng: -99.1944 }),
-  );
-  save(); render(); toast('Ejemplos cargados');
+  ];
+  for (const r of rows) { const saved = await insertItem(r); if (saved) state.items.unshift(saved); }
+  render(); toast('Ejemplos cargados');
 }
 
 /* ================= NAVEGACIÓN ================= */
@@ -505,7 +563,35 @@ function burst() {
   (function f() { g.clearRect(0, 0, c.width, c.height); bursts.forEach(b => { b.x += b.vx; b.y += b.vy; b.vy += .18; b.l -= .012; g.globalAlpha = Math.max(0, b.l); g.fillStyle = b.c; g.fillRect(b.x, b.y, 4, 4); }); bursts = bursts.filter(b => b.l > 0); bursts.length ? requestAnimationFrame(f) : c.remove(); })();
 }
 
-/* ================= ARRANQUE ================= */
-if (/[?&]demo/.test(location.search) && !state.items.length) loadDemo();
-loadPhotos().finally(render);
+/* ================= SESIÓN ================= */
+let booted = false;
+async function boot() {
+  if (booted) return; booted = true;
+  await fetchItems();
+  if (/[?&]demo/.test(location.search) && !state.items.length) await loadDemo();
+  await loadPhotos();
+  render();
+}
+function showGate(msg) {
+  $('#gate').classList.add('show'); $('#gate').setAttribute('aria-hidden', 'false');
+  if (msg) { const n = $('#gate-note'); n.textContent = msg; n.classList.add('err'); }
+}
+function hideGate() { $('#gate').classList.remove('show'); $('#gate').setAttribute('aria-hidden', 'true'); }
+$('#gate-form').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('#gate-email').value.trim(); if (!email) return;
+  const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Enviando…';
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split('#')[0] } });
+  btn.disabled = false; btn.textContent = 'Enviar enlace mágico';
+  const n = $('#gate-note');
+  n.classList.toggle('err', !!error);
+  n.textContent = error ? 'No se pudo enviar: ' + error.message : `Revisa ${email}: te hemos enviado un enlace de acceso.`;
+};
+sb.auth.onAuthStateChange((event, s) => {
+  session = s;
+  if (s) { hideGate(); boot(); }
+  else if (event !== 'INITIAL_SESSION') { booted = false; state = { items: [] }; Object.keys(photos).forEach(k => delete photos[k]); showGate(); }
+});
+sb.auth.getSession().then(({ data }) => { session = data.session; if (session) boot(); else showGate(); });
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => { });

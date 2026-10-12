@@ -286,3 +286,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
   .card.feat{grid-column:span 2;aspect-ratio:4/5}.card.feat .info h3{font-size:2.4rem}
 }
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* ---- puerta de acceso (login) ---- */
+.gate{position:fixed;inset:0;z-index:300;display:none;place-items:center;padding:1.2rem;background:radial-gradient(120% 80% at 50% 0%,#1a130d 0,var(--bg) 60%)}
+.gate.show{display:grid}
+.gate-card{width:min(420px,100%);background:linear-gradient(180deg,#17120f,#0f0c0a);border:1px solid var(--line);border-radius:28px;padding:2.4rem 2rem;text-align:center;box-shadow:0 40px 120px rgba(0,0,0,.6);animation:zoom .6s var(--ease)}
+.gate-lead{color:var(--muted);font-size:.9rem;line-height:1.6;margin:.8rem 0 1.6rem}
+#gate-form{display:flex;flex-direction:column;gap:.8rem}
+#gate-form input{padding:.85rem 1.1rem;background:var(--panel);border:1px solid var(--line);border-radius:999px;outline:0;text-align:center;font-size:.95rem;transition:border .25s,box-shadow .25s}
+#gate-form input:focus{border-color:var(--gold);box-shadow:0 0 0 4px rgba(217,180,106,.1)}
+.gate-note{margin-top:1.2rem;font-size:.72rem;color:var(--muted);line-height:1.5}
+.gate-note.err{color:#e48a97}
+.gate-user{position:fixed;z-index:35;right:var(--pad);top:1.3rem;font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.6rem}
+.gate-user button{text-decoration:underline;text-underline-offset:2px}
+@media(max-width:820px){.gate-user{display:none}}
